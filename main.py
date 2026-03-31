@@ -1,5 +1,4 @@
-import os, json, time
-import asyncio
+import os, json
 from threading import Thread
 from flask import Flask
 import discord
@@ -8,7 +7,7 @@ from discord import app_commands
 from discord.ui import Button, View, Select, Modal, TextInput
 
 # =========================
-# Flaskでのkeep_alive
+# Flask keep_alive
 # =========================
 app = Flask("")
 
@@ -16,19 +15,16 @@ app = Flask("")
 def home():
     return "I'm alive"
 
-def run():
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
 
 def keep_alive():
-    Thread(target=run).start()
+    Thread(target=run_flask).start()
 
 # =========================
-# ファイル設定
+# Discord Bot
 # =========================
-DATA_FILE = "products.json"
-SHOP_MSG_FILE = "shop_messages.json"
-INFO_FILE = "info.json"
-
 ADMIN_CHANNEL_ID = 1292094034441142302
 RESULT_CHANNEL_ID = 1200371155123589201
 GUILD_ID = 1200368636922167339
@@ -39,8 +35,12 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # =========================
-# データ読み込み
+# データファイル
 # =========================
+DATA_FILE = "products.json"
+SHOP_MSG_FILE = "shop_messages.json"
+INFO_FILE = "info.json"
+
 if os.path.exists(DATA_FILE):
     with open(DATA_FILE, "r", encoding="utf-8") as f:
         PRODUCTS = json.load(f)
@@ -57,7 +57,7 @@ if os.path.exists(INFO_FILE):
     with open(INFO_FILE, "r", encoding="utf-8") as f:
         info = json.load(f)
 else:
-    info = {}  # 任意の永続情報
+    info = {}
 
 # =========================
 # 保存関数
@@ -75,7 +75,7 @@ def save_info():
         json.dump(info, f, ensure_ascii=False, indent=4)
 
 # =========================
-# SHOP Embed
+# Embed生成
 # =========================
 def generate_shop_embed():
     embed = discord.Embed(title="🛒 ショップ", color=0x00FF88)
@@ -99,7 +99,7 @@ async def update_all_shop_messages():
             pass
 
 # =========================
-# モーダル・ビュー（省略せず全部保持）
+# モーダル・ビュー
 # =========================
 class PurchaseModal(Modal):
     def __init__(self, product):
@@ -111,22 +111,16 @@ class PurchaseModal(Modal):
         self.add_item(self.pay)
 
     async def on_submit(self, interaction: discord.Interaction):
-        # PayPayリンク確認
+        # PayPayリンク簡易チェック
         pay_text = self.pay.value.lower()
         if not ("https://" in pay_text and "paypay" in pay_text and "ne" in pay_text and "jp" in pay_text):
             await interaction.response.send_message("❌ 正しいPayPayリンクではありません。", ephemeral=True)
             return
         try:
             qty = int(self.qty.value)
-            if qty <= 0:
-                raise ValueError
-        except ValueError:
+            if qty <= 0: raise ValueError
+        except:
             await interaction.response.send_message("❌ 数量は1以上の数字で入力してください。", ephemeral=True)
-            return
-
-        admin = bot.get_channel(ADMIN_CHANNEL_ID)
-        if admin is None:
-            await interaction.response.send_message("❌ 管理者チャンネルが見つかりません。", ephemeral=True)
             return
 
         stock_list = PRODUCTS[self.product]["stock_list"]
@@ -134,7 +128,11 @@ class PurchaseModal(Modal):
             await interaction.response.send_message("❌ 在庫不足です", ephemeral=True)
             return
 
-        # 購入申請を管理者チャンネルに送信
+        admin = bot.get_channel(ADMIN_CHANNEL_ID)
+        if admin is None:
+            await interaction.response.send_message("❌ 管理者チャンネルが見つかりません。", ephemeral=True)
+            return
+
         embed = discord.Embed(title="購入申請")
         embed.add_field(name="購入者", value=interaction.user.mention)
         embed.add_field(name="商品", value=self.product)
@@ -149,9 +147,6 @@ class ProductSelect(Select):
         super().__init__(placeholder="商品選択", options=[discord.SelectOption(label=n) for n in PRODUCTS])
 
     async def callback(self, interaction: discord.Interaction):
-        if not PRODUCTS[self.values[0]]["stock_list"]:
-            await interaction.response.send_message("在庫なし", ephemeral=True)
-            return
         await interaction.response.send_modal(PurchaseModal(self.values[0]))
 
 class ShopView(View):
@@ -196,7 +191,7 @@ class AdminConfirmView(View):
         await interaction.response.send_message("取引キャンセル", ephemeral=True)
 
 # =========================
-# 管理UI
+# 管理コマンド /admin_manage
 # =========================
 class AdminProductSelect(Select):
     def __init__(self):
@@ -222,7 +217,7 @@ class StockAddModal(Modal):
         items = [x.strip() for x in self.txt.value.split("\n") if x.strip()]
         PRODUCTS[self.product]["stock_list"].extend(items)
         save_products()
-        save_info()  # 永続化
+        save_info()
         await update_all_shop_messages()
         await interaction.response.send_message("追加完了", ephemeral=True)
 
@@ -237,7 +232,7 @@ class StockRemoveModal(Modal):
         q = int(self.qty.value)
         removed = [PRODUCTS[self.product]["stock_list"].pop(0) for _ in range(q)]
         save_products()
-        save_info()  # 永続化
+        save_info()
         await update_all_shop_messages()
         await interaction.response.send_message("取り出し:\n" + ",".join(removed), ephemeral=True)
 
@@ -251,7 +246,7 @@ class PriceModal(Modal):
     async def on_submit(self, interaction: discord.Interaction):
         PRODUCTS[self.product]["price"] = int(self.price.value)
         save_products()
-        save_info()  # 永続化
+        save_info()
         await update_all_shop_messages()
         await interaction.response.send_message("変更完了", ephemeral=True)
 
@@ -273,7 +268,7 @@ class AdminProductView(View):
         await i.response.send_modal(PriceModal(self.product))
 
 # =========================
-# コマンド
+# コマンド部分
 # =========================
 @bot.tree.command(name="shop")
 @app_commands.guilds(GUILD)
@@ -282,7 +277,7 @@ async def shop(interaction: discord.Interaction):
     msg = await interaction.original_response()
     shop_messages.append({"channel_id": msg.channel.id, "message_id": msg.id})
     save_shop_messages()
-    save_info()  # 永続化
+    save_info()
 
 @bot.tree.command(name="admin_manage")
 @app_commands.guilds(GUILD)
@@ -301,39 +296,34 @@ async def add_product_cmd(interaction: discord.Interaction, name: str, price: in
 @bot.tree.command(name="delete_product")
 @app_commands.guilds(GUILD)
 async def delete_product_cmd(interaction: discord.Interaction):
-    class Sel(Select):
+    class DeleteSelect(Select):
         def __init__(self):
-            super().__init__(placeholder="削除する商品", options=[discord.SelectOption(label=n) for n in PRODUCTS])
+            super().__init__(placeholder="削除する商品を選択", options=[discord.SelectOption(label=n) for n in PRODUCTS])
 
-        async def callback(self, interaction2):
+        async def callback(self, interaction2: discord.Interaction):
             product = self.values[0]
             del PRODUCTS[product]
             save_products()
             save_info()
             await update_all_shop_messages()
-            await interaction2.response.send_message(f"{product} を削除しました", ephemeral=True)
+            await interaction2.response.send_message(f"✅ {product} を削除しました", ephemeral=True)
 
     view = View(timeout=None)
-    view.add_item(Sel())
-    await interaction.response.send_message("削除する商品を選択", view=view, ephemeral=True)
+    view.add_item(DeleteSelect())
+    await interaction.response.send_message("削除する商品を選択してください", view=view, ephemeral=True)
 
 # =========================
-# 起動
+# Bot起動
 # =========================
 @bot.event
 async def on_ready():
     await bot.tree.sync(guild=GUILD)
     bot.add_view(ShopView())
     bot.add_view(AdminSelectView())
-    print("BOT起動")
+    print(f"BOT起動: {bot.user}")
 
+# Flask スレッドで起動
 keep_alive()
 
-while True:
-    try:
-        print("Starting bot...")
-        bot.run(os.getenv("TOKEN"))
-    except Exception as e:
-        print("Bot crashed:", e)
-        print("Restarting in 10秒...")
-        time.sleep(10)
+# Discord Bot 起動
+bot.run(os.environ.get("TOKEN"))
